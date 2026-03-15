@@ -22,35 +22,25 @@ Input detection:
 The script outputs JSON with fields: `title`, `price`, `rating`, `reviews`, `features` (bullet
 list), `description`, `brand`, `availability`, `asin`, `url`, `images`.
 
-The `images` field is an object with up to three keys:
+The `images` field contains the original URLs, grouped by source:
 - `gallery`: Product image carousel at top of page (product photos + infographics)
 - `aplus`: A+ / Enhanced Brand Content images (further down the page, often the richest source of
   specs, measurements, comparison charts, and technical claims)
 - `product_description`: Additional images from the product description section (deduplicated
   against gallery)
 
-## Download and review product images
+The `image_files` field contains the same grouping but with local file paths — the script
+automatically downloads all images to `/tmp/amazon_images_<ASIN>/` and filters out non-image files.
+
+## Review product images
 
 Amazon sellers embed critical product specs, measurements, certifications, and claims in infographic
 images that are NOT in the text. This information can be important (e.g. sensor types, battery
 capacity, reference tables).
 
-Download all images from all sections. **Use the ASIN as a unique directory name** to avoid conflicts
-when multiple product lookups run concurrently:
-
-```
-mkdir -p /tmp/amazon_images_ASIN && i=0; for url in URL1 URL2 ...; do curl -s -o "/tmp/amazon_images_ASIN/img_${i}.jpg" "$url" & i=$((i+1)); done; wait
-```
-
-(Replace `ASIN` with the actual ASIN, and substitute actual URLs from all arrays in the `images`
-object.)
-
-**Before reading each image with the Read tool**, verify it is an actual image file (not HTML/error
-page) by running `file /tmp/amazon_images_ASIN/*.jpg` and only read files identified as image data.
-
-Then use the Read tool to view each verified image. Extract any additional product specifications,
-measurements, certifications, sensor types, or technical claims visible in the images that are not
-already in the text fields. The A+ content images (`aplus` key) are typically the most
+Use the Read tool to view each image listed in `image_files`. Extract any additional product
+specifications, measurements, certifications, sensor types, or technical claims visible in the images
+that are not already in the text fields. The A+ content images (`aplus` key) are typically the most
 information-rich.
 
 ## Present

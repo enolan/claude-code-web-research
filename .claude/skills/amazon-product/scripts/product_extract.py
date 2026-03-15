@@ -1,7 +1,7 @@
 """Look up an Amazon product by ASIN or URL and extract structured details.
 
 Usage: uv run python product_extract.py <ASIN or Amazon URL>
-Outputs JSON object to stdout.
+Outputs JSON object to stdout. Downloads product images to /tmp/amazon_images_<ASIN>/.
 """
 
 import argparse
@@ -9,6 +9,7 @@ import re
 import json
 import html as html_mod
 import sys
+import concurrent.futures
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_shared"))
@@ -158,6 +159,61 @@ def extract_product(html: str) -> dict:
     return info
 
 
+def download_images(images: dict, asin: str) -> dict:
+    """Download all product images to /tmp/amazon_images_<ASIN>/ and return a
+    mapping of section -> list of local file paths (only files that are actual
+    images, not HTML error pages)."""
+    import subprocess
+
+    out_dir = Path(f"/tmp/amazon_images_{asin}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Collect (section, index, url) tuples
+    tasks = []
+    for section, urls in images.items():
+        for i, url in enumerate(urls):
+            tasks.append((section, i, url))
+
+    # Download in parallel
+    def _download(task):
+        section, i, url = task
+        dest = out_dir / f"{section}_{i}.jpg"
+        try:
+            resp = __import__("httpx").get(url, timeout=15, follow_redirects=True)
+            if resp.status_code == 200:
+                dest.write_bytes(resp.content)
+                return (section, str(dest))
+        except Exception:
+            pass
+        return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(_download, tasks))
+
+    # Filter to actual image files using `file` command
+    all_paths = [r[1] for r in results if r is not None]
+    if all_paths:
+        proc = subprocess.run(
+            ["file"] + all_paths, capture_output=True, text=True
+        )
+        image_paths = set()
+        for line in proc.stdout.splitlines():
+            if any(t in line for t in ("image data", "JPEG", "PNG", "WebP")):
+                image_paths.add(line.split(":")[0].strip())
+    else:
+        image_paths = set()
+
+    # Build section -> [path] mapping, preserving order
+    downloaded = {}
+    for r in results:
+        if r is not None:
+            section, path = r
+            if path in image_paths:
+                downloaded.setdefault(section, []).append(path)
+
+    return downloaded
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Look up an Amazon product by ASIN or URL"
@@ -172,4 +228,9 @@ if __name__ == "__main__":
     check_captcha(html)
 
     info = extract_product(html)
+
+    # Download images and replace URLs with local paths
+    if info.get("images"):
+        info["image_files"] = download_images(info["images"], asin)
+
     print(json.dumps(info, indent=2))
